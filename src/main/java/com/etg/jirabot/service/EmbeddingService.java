@@ -19,8 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
+import java.nio.file.Paths;
 import java.util.Map;
 
 @Service
@@ -29,21 +28,19 @@ public class EmbeddingService {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
     public static final int EMBEDDING_DIM = 384;
 
-    private static final String TOKENIZER_URL =
-            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json";
-
     private ZooModel<String, float[]> model;
     private Predictor<String, float[]> predictor;
 
     @PostConstruct
     public void init() throws Exception {
-        log.info("Loading local embedding model...");
+        String modelPath = System.getenv().getOrDefault("MODEL_PATH", "/app/model");
+        log.info("Loading embedding model from: {}", modelPath);
 
         Criteria<String, float[]> criteria = Criteria.builder()
                 .setTypes(String.class, float[].class)
-                .optModelUrls("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/")
-                .optModelName("all-MiniLM-L6-v2")
-                .optTranslator(new SentenceTranslator(TOKENIZER_URL))
+                .optModelPath(Paths.get(modelPath))
+                .optModelName("pytorch_model")
+                .optTranslator(new SentenceTranslator(modelPath))
                 .optProgress(new ProgressBar())
                 .optEngine("PyTorch")
                 .build();
@@ -69,19 +66,19 @@ public class EmbeddingService {
 
     private static class SentenceTranslator implements Translator<String, float[]> {
 
-        private final String tokenizerUrl;
+        private final String modelPath;
         private HuggingFaceTokenizer tokenizer;
 
-        SentenceTranslator(String tokenizerUrl) {
-            this.tokenizerUrl = tokenizerUrl;
+        SentenceTranslator(String modelPath) {
+            this.modelPath = modelPath;
         }
 
         @Override
         public void prepare(TranslatorContext ctx) throws IOException {
-            try (InputStream is = new URL(tokenizerUrl).openStream()) {
-                tokenizer = HuggingFaceTokenizer.newInstance(is,
-                        Map.of("padding", "true", "truncation", "true", "maxLength", "512"));
-            }
+            tokenizer = HuggingFaceTokenizer.newInstance(
+                    Paths.get(modelPath, "tokenizer.json"),
+                    Map.of("padding", "true", "truncation", "true", "maxLength", "512")
+            );
         }
 
         @Override
