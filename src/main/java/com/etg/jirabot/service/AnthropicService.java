@@ -7,8 +7,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.*;
 
@@ -28,6 +30,9 @@ public class AnthropicService {
 
     @Value("${anthropic.file-ids-json}")
     private String fileIdsJson;
+
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 60_000; // 60 seconds
 
     private static final String SYSTEM_PROMPT = """
             You are a technical support assistant for the ETG (Emerging Travel Group) API.
@@ -50,10 +55,8 @@ public class AnthropicService {
     public String askClaude(String issueText) {
         log.info("Calling Claude API with Files API, issue text length={}", issueText.length());
 
-        // Build content array with all file references + the question
         List<Map<String, Object>> userContent = new ArrayList<>();
 
-        // Add all doc files as document references
         List<String> fileIds = getFileIds();
         log.info("Using {} documentation files", fileIds.size());
 
@@ -67,7 +70,6 @@ public class AnthropicService {
             ));
         }
 
-        // Add the actual question
         userContent.add(Map.of("type", "text", "text", issueText));
 
         Map<String, Object> requestBody = new LinkedHashMap<>();
@@ -78,27 +80,46 @@ public class AnthropicService {
                 Map.of("role", "user", "content", userContent)
         ));
 
-        // Files API requires beta header
-        JsonNode response = anthropicWebClient.post()
-                .uri("/v1/messages")
-                .header("anthropic-beta", "files-api-2025-04-14")
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        return callWithRetry(requestBody, 0);
+    }
 
-        if (response == null || !response.has("content")) {
-            throw new RuntimeException("Empty or invalid response from Anthropic API");
+    private String callWithRetry(Map<String, Object> requestBody, int attempt) {
+        try {
+            JsonNode response = anthropicWebClient.post()
+                    .uri("/v1/messages")
+                    .header("anthropic-beta", "files-api-2025-04-14")
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+
+            if (response == null || !response.has("content")) {
+                throw new RuntimeException("Empty or invalid response from Anthropic API");
+            }
+
+            JsonNode contentArray = response.get("content");
+            if (contentArray.isEmpty()) {
+                throw new RuntimeException("Anthropic returned empty content array");
+            }
+
+            String answer = contentArray.get(0).get("text").asText();
+            log.info("Claude answered with {} characters", answer.length());
+            return answer;
+
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS && attempt < MAX_RETRIES) {
+                log.warn("Rate limit hit (429). Attempt {}/{}. Waiting {}s before retry...",
+                        attempt + 1, MAX_RETRIES, RETRY_DELAY_MS / 1000);
+                try {
+                    Thread.sleep(RETRY_DELAY_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during retry wait", ie);
+                }
+                return callWithRetry(requestBody, attempt + 1);
+            }
+            throw e;
         }
-
-        JsonNode contentArray = response.get("content");
-        if (contentArray.isEmpty()) {
-            throw new RuntimeException("Anthropic returned empty content array");
-        }
-
-        String answer = contentArray.get(0).get("text").asText();
-        log.info("Claude answered with {} characters", answer.length());
-        return answer;
     }
 
     private List<String> getFileIds() {
@@ -111,4 +132,4 @@ public class AnthropicService {
             throw new RuntimeException("Failed to parse ANTHROPIC_FILE_IDS: " + e.getMessage(), e);
         }
     }
-}   
+}
