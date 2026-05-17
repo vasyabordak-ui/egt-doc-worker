@@ -33,7 +33,13 @@ public class BotService {
         String answer = anthropicService.askClaude(issueText);
 
         // Step 3: Post as internal comment in Jira
-        String commentWithFooter = answer + "\n\n---\n_This answer was generated automatically based on ETG API documentation._";
+        // Clean up any markdown artifacts Claude adds around links
+        String cleanAnswer = answer
+                .replaceAll("__\\[", "[")
+                .replaceAll("\\]__", "]")
+                .replaceAll("\*\*\\[", "[")
+                .replaceAll("\\]\*\*", "]");
+        String commentWithFooter = cleanAnswer + "\n\n---\n_This answer was generated automatically based on ETG API documentation._";
         jiraService.postInternalComment(issueKey, commentWithFooter);
 
         log.info("Pipeline completed for issue: {}", issueKey);
