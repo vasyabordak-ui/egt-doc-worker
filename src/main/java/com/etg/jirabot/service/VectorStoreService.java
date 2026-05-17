@@ -7,10 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class VectorStoreService {
@@ -47,21 +44,48 @@ public class VectorStoreService {
     }
 
     /**
-     * Find top-K most similar chunks to the query embedding using cosine distance.
+     * Find top-K most relevant FILENAMES for the query.
+     * Uses cosine distance to rank chunks, then deduplicates by filename.
+     * Returns filenames ordered by their best chunk score.
      */
-    public List<String> findSimilarChunks(float[] queryEmbedding) {
+    public List<String> findRelevantFilenames(float[] queryEmbedding, int maxFiles) {
         String vectorStr = toVectorString(queryEmbedding);
         String sql = """
-                SELECT content
+                SELECT DISTINCT ON (filename) filename,
+                       embedding <=> ?::vector AS distance
                 FROM doc_chunks
-                ORDER BY embedding <=> ?::vector
+                ORDER BY filename, embedding <=> ?::vector
                 LIMIT ?
                 """;
 
-        return jdbc.query(sql,
-                (rs, rowNum) -> rs.getString("content"),
-                vectorStr, topK
+        // Get best-matching chunk per file, then sort by distance and take top N files
+        String outerSql = """
+                SELECT filename FROM (
+                    SELECT DISTINCT ON (filename) filename,
+                           embedding <=> ?::vector AS distance
+                    FROM doc_chunks
+                    ORDER BY filename, embedding <=> ?::vector
+                ) ranked
+                ORDER BY distance
+                LIMIT ?
+                """;
+
+        return jdbc.query(outerSql,
+                (rs, rowNum) -> rs.getString("filename"),
+                vectorStr, vectorStr, maxFiles
         );
+    }
+
+    /**
+     * Get all chunk contents for a specific file, ordered by chunk index.
+     */
+    public String getFileContent(String filename) {
+        List<String> chunks = jdbc.query(
+                "SELECT content FROM doc_chunks WHERE filename = ? ORDER BY chunk_index",
+                (rs, rowNum) -> rs.getString("content"),
+                filename
+        );
+        return String.join("\n\n", chunks);
     }
 
     private String toVectorString(float[] embedding) {

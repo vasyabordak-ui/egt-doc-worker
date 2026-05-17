@@ -29,6 +29,9 @@ public class AnthropicService {
     @Value("${anthropic.max-tokens}")
     private int maxTokens;
 
+    @Value("${rag.top-files:5}")
+    private int topFiles;
+
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 60_000;
 
@@ -44,19 +47,19 @@ public class AnthropicService {
 
     private static final String ANSWER_PROMPT = """
             You are a technical support assistant for the ETG (Emerging Travel Group) API.
-            Answer the question below based strictly on the provided documentation excerpts.
+            Answer the question below based strictly on the provided documentation.
             
             Rules:
             - Answer directly and concisely. Do not quote or paraphrase documentation — just state the facts.
             - Do not write phrases like "the documentation says", "based on the docs", "according to the documentation". Just answer.
-            - If a specific question cannot be answered from the docs, say clearly: "This is not covered in the documentation. Please contact ETG support."
+            - If a specific question cannot be answered from the provided docs, say: "This is not covered in the available documentation. Please contact ETG support."
             - Always respond in the same language as the question.
             - Do not mention that you are Claude or an AI.
             - Format your answer in Markdown: use ## headings for each sub-question, **bold** key terms, bullet lists, and code blocks where appropriate.
             - If the question has multiple sub-questions, answer each one with a clear ## heading.
             - End with a ## Summary table if there are multiple questions.
             
-            Documentation excerpts:
+            Documentation:
             %s
             
             Question:
@@ -74,22 +77,32 @@ public class AnthropicService {
     }
 
     public String askClaude(String issueText) {
+        // Step 1: Decompose question into sub-queries
         List<String> subQueries = decomposeQuestion(issueText);
         log.info("Decomposed into {} sub-queries", subQueries.size());
 
-        Set<String> uniqueChunks = new LinkedHashSet<>();
+        // Step 2: Find relevant FILES for each sub-query
+        Set<String> relevantFiles = new LinkedHashSet<>();
         for (String query : subQueries) {
-            log.info("Searching for: {}", query.substring(0, Math.min(60, query.length())));
+            log.info("Searching files for: {}", query.substring(0, Math.min(60, query.length())));
             float[] embedding = embeddingService.embed(query);
-            List<String> chunks = vectorStoreService.findSimilarChunks(embedding);
-            uniqueChunks.addAll(chunks);
+            List<String> files = vectorStoreService.findRelevantFilenames(embedding, topFiles);
+            relevantFiles.addAll(files);
         }
-        log.info("Found {} unique chunks across all sub-queries", uniqueChunks.size());
+        log.info("Found {} unique relevant files: {}", relevantFiles.size(), relevantFiles);
 
-        String context = String.join("\n\n---\n\n", uniqueChunks);
-        String userMessage = ANSWER_PROMPT.formatted(context, issueText);
+        // Step 3: Load FULL content of each relevant file
+        StringBuilder context = new StringBuilder();
+        for (String filename : relevantFiles) {
+            String content = vectorStoreService.getFileContent(filename);
+            context.append("### ").append(filename).append("\n\n");
+            context.append(content).append("\n\n---\n\n");
+        }
 
-        log.info("Calling Claude with context size={} chars", context.length());
+        log.info("Total context size: {} chars from {} files", context.length(), relevantFiles.size());
+
+        // Step 4: Ask Claude with full file content
+        String userMessage = ANSWER_PROMPT.formatted(context.toString(), issueText);
 
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", model);
@@ -117,22 +130,18 @@ public class AnthropicService {
                     .bodyToMono(JsonNode.class)
                     .block();
 
-            if (response == null || !response.has("content")) {
-                return List.of(question);
-            }
+            if (response == null || !response.has("content")) return List.of(question);
 
             String text = response.get("content").get(0).get("text").asText().trim();
             text = text.replaceAll("```json|```", "").trim();
 
             JsonNode arr = objectMapper.readTree(text);
             List<String> queries = new ArrayList<>();
-            for (JsonNode node : arr) {
-                queries.add(node.asText());
-            }
+            for (JsonNode node : arr) queries.add(node.asText());
             return queries.isEmpty() ? List.of(question) : queries;
 
         } catch (Exception e) {
-            log.warn("Failed to decompose question, using original: {}", e.getMessage());
+            log.warn("Failed to decompose question: {}", e.getMessage());
             return List.of(question);
         }
     }
