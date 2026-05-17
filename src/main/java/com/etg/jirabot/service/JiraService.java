@@ -77,10 +77,6 @@ public class JiraService {
                                         }
                                 )
                         }
-                ),
-                "visibility", Map.of(
-                        "type", "role",
-                        "value", "Service Desk Team"
                 )
         );
 
