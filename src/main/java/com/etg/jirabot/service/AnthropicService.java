@@ -47,12 +47,14 @@ public class AnthropicService {
             Answer the question below based strictly on the provided documentation excerpts.
             
             Rules:
-            - Answer only based on the documentation provided.
-            - If a specific question cannot be answered from the docs, say so clearly and suggest contacting ETG support.
+            - Answer directly and concisely. Do not quote or paraphrase documentation — just state the facts.
+            - Do not write phrases like "the documentation says", "based on the docs", "according to the documentation". Just answer.
+            - If a specific question cannot be answered from the docs, say clearly: "This is not covered in the documentation. Please contact ETG support."
             - Always respond in the same language as the question.
             - Do not mention that you are Claude or an AI.
-            - Format your answer in Markdown: use ## headings, **bold**, bullet lists, and code blocks where appropriate.
-            - If the question has multiple sub-questions, answer each one separately with a clear heading.
+            - Format your answer in Markdown: use ## headings for each sub-question, **bold** key terms, bullet lists, and code blocks where appropriate.
+            - If the question has multiple sub-questions, answer each one with a clear ## heading.
+            - End with a ## Summary table if there are multiple questions.
             
             Documentation excerpts:
             %s
@@ -72,11 +74,9 @@ public class AnthropicService {
     }
 
     public String askClaude(String issueText) {
-        // Step 1: Decompose question into sub-queries
         List<String> subQueries = decomposeQuestion(issueText);
         log.info("Decomposed into {} sub-queries", subQueries.size());
 
-        // Step 2: Search for relevant chunks for each sub-query
         Set<String> uniqueChunks = new LinkedHashSet<>();
         for (String query : subQueries) {
             log.info("Searching for: {}", query.substring(0, Math.min(60, query.length())));
@@ -86,7 +86,6 @@ public class AnthropicService {
         }
         log.info("Found {} unique chunks across all sub-queries", uniqueChunks.size());
 
-        // Step 3: Build context and answer
         String context = String.join("\n\n---\n\n", uniqueChunks);
         String userMessage = ANSWER_PROMPT.formatted(context, issueText);
 
@@ -102,9 +101,6 @@ public class AnthropicService {
         return callWithRetry(requestBody, 0);
     }
 
-    /**
-     * Uses Claude to decompose a complex question into individual search queries.
-     */
     private List<String> decomposeQuestion(String question) {
         try {
             Map<String, Object> requestBody = new LinkedHashMap<>();
@@ -126,7 +122,6 @@ public class AnthropicService {
             }
 
             String text = response.get("content").get(0).get("text").asText().trim();
-            // Strip markdown code fences if present
             text = text.replaceAll("```json|```", "").trim();
 
             JsonNode arr = objectMapper.readTree(text);
@@ -134,7 +129,6 @@ public class AnthropicService {
             for (JsonNode node : arr) {
                 queries.add(node.asText());
             }
-            log.info("Sub-queries: {}", queries);
             return queries.isEmpty() ? List.of(question) : queries;
 
         } catch (Exception e) {
