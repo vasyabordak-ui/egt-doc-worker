@@ -50,7 +50,7 @@ public class JiraService {
     public void postInternalComment(String issueKey, String markdownText) {
         log.info("Posting comment to issue: {}", issueKey);
 
-        List<Map<String, Object>> adfContent = markdownToAdf(markdownText);
+        List<Map<String, Object>> adfContent = textToAdf(markdownText);
 
         Map<String, Object> body = Map.of(
                 "body", Map.of(
@@ -194,6 +194,32 @@ public class JiraService {
 
         if (nodes.isEmpty()) nodes.add(Map.of("type", "text", "text", text));
         return nodes;
+    }
+
+    /**
+     * Converts plain text to ADF paragraphs.
+     * Splits on double newlines for paragraph breaks, single newlines within paragraphs.
+     */
+    private List<Map<String, Object>> textToAdf(String text) {
+        List<Map<String, Object>> blocks = new ArrayList<>();
+        String[] paragraphs = text.split("\n\n+");
+
+        for (String para : paragraphs) {
+            if (para.isBlank()) continue;
+            blocks.add(Map.of(
+                "type", "paragraph",
+                "content", List.of(Map.of("type", "text", "text", para.trim()))
+            ));
+        }
+
+        if (blocks.isEmpty()) {
+            blocks.add(Map.of(
+                "type", "paragraph",
+                "content", List.of(Map.of("type", "text", "text", text))
+            ));
+        }
+
+        return blocks;
     }
 
     private String extractTextFromAdf(JsonNode node) {

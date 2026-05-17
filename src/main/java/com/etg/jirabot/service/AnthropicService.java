@@ -50,14 +50,23 @@ public class AnthropicService {
             Answer the question below based strictly on the provided documentation.
             
             Rules:
-            - Answer directly and concisely. Do not quote or paraphrase documentation — just state the facts.
-            - Do not write phrases like "the documentation says", "based on the docs", "according to the documentation". Just answer.
+            - Answer directly and concisely. State facts without phrases like "the documentation says" or "based on the docs".
             - If a specific question cannot be answered from the provided docs, say: "This is not covered in the available documentation. Please contact ETG support."
             - Always respond in the same language as the question.
             - Do not mention that you are Claude or an AI.
-            - Format your answer in Markdown: use ## headings for each sub-question, **bold** key terms, bullet lists, and code blocks where appropriate.
-            - If the question has multiple sub-questions, answer each one with a clear ## heading.
-            - End with a ## Summary table if there are multiple questions.
+            - If the question has multiple sub-questions, answer each one with a clear bold heading.
+            - After each answer section, add a reference link to the relevant doc page. Use this format: [docs.emergingtravel.com/docs/FILENAME](https://docs.emergingtravel.com/docs/FILENAME) where FILENAME is the source file name without .md extension.
+            - End with a *Summary* section if there are multiple questions.
+            
+            FORMATTING — use Jira Wiki Markup only:
+            - Headings: use *bold text* (single asterisk each side, NOT double **)
+            - Bullet lists: start each item with - (dash space)
+            - Numbered lists: 1. 2. 3.
+            - Field/code names: use {{monospace}} (double curly braces each side)
+            - Do NOT use ## headings
+            - Do NOT use ** for bold
+            - Do NOT use | pipe tables — use bullet lists instead
+            - Do NOT use ``` code blocks — use {{field}} inline notation
             
             Documentation:
             %s
