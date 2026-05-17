@@ -19,7 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.URI;
+import java.io.InputStream;
+import java.net.URL;
 import java.util.Map;
 
 @Service
@@ -27,6 +28,9 @@ public class EmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
     public static final int EMBEDDING_DIM = 384;
+
+    private static final String TOKENIZER_URL =
+            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json";
 
     private ZooModel<String, float[]> model;
     private Predictor<String, float[]> predictor;
@@ -39,7 +43,7 @@ public class EmbeddingService {
                 .setTypes(String.class, float[].class)
                 .optModelUrls("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/")
                 .optModelName("all-MiniLM-L6-v2")
-                .optTranslator(new SentenceTranslator())
+                .optTranslator(new SentenceTranslator(TOKENIZER_URL))
                 .optProgress(new ProgressBar())
                 .optEngine("PyTorch")
                 .build();
@@ -65,15 +69,19 @@ public class EmbeddingService {
 
     private static class SentenceTranslator implements Translator<String, float[]> {
 
+        private final String tokenizerUrl;
         private HuggingFaceTokenizer tokenizer;
+
+        SentenceTranslator(String tokenizerUrl) {
+            this.tokenizerUrl = tokenizerUrl;
+        }
 
         @Override
         public void prepare(TranslatorContext ctx) throws IOException {
-            // Use full HuggingFace URL for tokenizer
-            tokenizer = HuggingFaceTokenizer.newInstance(
-                    URI.create("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"),
-                    Map.of("padding", "true", "truncation", "true", "maxLength", "512")
-            );
+            try (InputStream is = new URL(tokenizerUrl).openStream()) {
+                tokenizer = HuggingFaceTokenizer.newInstance(is,
+                        Map.of("padding", "true", "truncation", "true", "maxLength", "512"));
+            }
         }
 
         @Override
@@ -91,7 +99,6 @@ public class EmbeddingService {
             NDArray tokenEmbeddings = list.get(0);
             NDArray meanPooled = tokenEmbeddings.mean(new int[]{1}).squeeze();
             float[] arr = meanPooled.toFloatArray();
-            // L2 normalize
             float norm = 0f;
             for (float v : arr) norm += v * v;
             norm = (float) Math.sqrt(norm);
