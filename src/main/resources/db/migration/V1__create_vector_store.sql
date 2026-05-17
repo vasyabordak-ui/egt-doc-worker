@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
     filename    VARCHAR(255) NOT NULL,
     chunk_index INT NOT NULL,
     content     TEXT NOT NULL,
-    embedding   vector(1536),
+    embedding   vector(384),
     created_at  TIMESTAMP DEFAULT NOW()
 );
 
