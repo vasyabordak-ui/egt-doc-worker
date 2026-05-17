@@ -20,7 +20,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.Arrays;
+import java.net.URI;
+import java.nio.file.Path;
 
 /**
  * Local embeddings using sentence-transformers/all-MiniLM-L6-v2 via DJL.
@@ -80,7 +81,7 @@ public class EmbeddingService {
 
         @Override
         public NDList processInput(TranslatorContext ctx, String input) {
-            Encoding encoding = tokenizer.encode(input, true);
+            Encoding encoding = tokenizer.encode(input);
             NDManager manager = ctx.getNDManager();
             NDArray inputIds = manager.create(encoding.getIds());
             NDArray attentionMask = manager.create(encoding.getAttentionMask());
@@ -90,10 +91,8 @@ public class EmbeddingService {
 
         @Override
         public float[] processOutput(TranslatorContext ctx, NDList list) {
-            // Mean pooling over token embeddings
             NDArray tokenEmbeddings = list.get(0);
             NDArray meanPooled = tokenEmbeddings.mean(new int[]{0});
-            // L2 normalize
             NDArray norm = meanPooled.norm();
             NDArray normalized = meanPooled.div(norm);
             return normalized.toFloatArray();
