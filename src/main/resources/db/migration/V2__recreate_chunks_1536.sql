@@ -1,6 +1,6 @@
-CREATE EXTENSION IF NOT EXISTS vector;
+DROP TABLE IF EXISTS doc_chunks;
 
-CREATE TABLE IF NOT EXISTS doc_chunks (
+CREATE TABLE doc_chunks (
     id          BIGSERIAL PRIMARY KEY,
     filename    VARCHAR(255) NOT NULL,
     chunk_index INT NOT NULL,

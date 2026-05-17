@@ -1,24 +1,15 @@
-FROM eclipse-temurin:21-jdk AS build
+FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y maven python3 python3-pip && \
-    pip3 install --break-system-packages huggingface_hub transformers torch
 
 COPY pom.xml .
 COPY src ./src
-COPY download_model.py .
 
-RUN python3 download_model.py
+RUN apk add --no-cache maven && mvn package -DskipTests -q
 
-RUN mvn package -DskipTests -q
-
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-COPY --from=build /app/model /app/model
 COPY --from=build /app/target/jira-claude-bot-1.0.0.jar app.jar
-
-ENV MODEL_PATH=/app/model
 
 EXPOSE 8080
 
