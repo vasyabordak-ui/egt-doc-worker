@@ -23,12 +23,8 @@ public class BotService {
         String issueText = jiraService.getIssueText(issueKey);
         String answer = anthropicService.askClaude(issueText);
 
-        // Remove __ or ** wrappers that Claude sometimes adds around links
-        String cleanAnswer = answer
-                .replace("__[", "[")
-                .replace("]__", "]")
-                .replace("**[", "[")
-                .replace("]**", "]");
+        // Remove all double-underscores (Claude sometimes wraps links in __..__)
+        String cleanAnswer = answer.replace("__", "");
 
         String commentWithFooter = cleanAnswer
                 + "\n\n---\n_This answer was generated automatically based on ETG API documentation._";
