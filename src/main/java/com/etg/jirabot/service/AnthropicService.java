@@ -55,7 +55,7 @@ public class AnthropicService {
             - Always respond in the same language as the question.
             - Do not mention that you are Claude or an AI.
             - If the question has multiple sub-questions, answer each one with a ## heading.
-            - After each section add a reference link using format: [Source: PAGENAME](https://docs.emergingtravel.com/docs/FILENAME) where FILENAME is the source filename without .md
+            - After each section add a reference link using this exact format (no underscores, no bold around it): [Source: PAGENAME](https://docs.emergingtravel.com/docs/FILENAME) where FILENAME is the source filename without .md. Do NOT wrap the link in __ or ** or any other markers.
             - End with ## Summary section if there are multiple questions (use bullet list, not table).
             
             FORMATTING — use standard Markdown:
