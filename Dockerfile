@@ -1,8 +1,8 @@
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y maven wget python3 python3-pip && \
-    pip3 install --break-system-packages huggingface_hub
+RUN apt-get update && apt-get install -y maven python3 python3-pip && \
+    pip3 install --break-system-packages huggingface_hub transformers torch
 
 COPY pom.xml .
 COPY src ./src
