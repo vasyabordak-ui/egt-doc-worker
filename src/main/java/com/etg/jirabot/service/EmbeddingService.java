@@ -19,8 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.net.URI;
+import java.util.Map;
 
 @Service
 public class EmbeddingService {
@@ -69,9 +69,10 @@ public class EmbeddingService {
 
         @Override
         public void prepare(TranslatorContext ctx) throws IOException {
+            // Use full HuggingFace URL for tokenizer
             tokenizer = HuggingFaceTokenizer.newInstance(
-                    "sentence-transformers/all-MiniLM-L6-v2",
-                    java.util.Map.of("padding", "true", "truncation", "true", "maxLength", "512")
+                    URI.create("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"),
+                    Map.of("padding", "true", "truncation", "true", "maxLength", "512")
             );
         }
 
@@ -88,13 +89,14 @@ public class EmbeddingService {
         @Override
         public float[] processOutput(TranslatorContext ctx, NDList list) {
             NDArray tokenEmbeddings = list.get(0);
-            // Mean pool over sequence dimension (dim=1)
-            NDArray meanPooled = tokenEmbeddings.mean(new int[]{1});
-            NDArray squeezed = meanPooled.squeeze();
+            NDArray meanPooled = tokenEmbeddings.mean(new int[]{1}).squeeze();
+            float[] arr = meanPooled.toFloatArray();
             // L2 normalize
-            float norm = (float) Math.sqrt(squeezed.dot(squeezed).toFloatArray()[0]);
-            NDArray normalized = squeezed.div(norm);
-            return normalized.toFloatArray();
+            float norm = 0f;
+            for (float v : arr) norm += v * v;
+            norm = (float) Math.sqrt(norm);
+            for (int i = 0; i < arr.length; i++) arr[i] /= norm;
+            return arr;
         }
 
         @Override
