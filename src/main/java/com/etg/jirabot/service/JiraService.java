@@ -33,9 +33,7 @@ public class JiraService {
                 .bodyToMono(JsonNode.class)
                 .block();
 
-        if (issue == null) {
-            throw new RuntimeException("Jira returned null for issue: " + issueKey);
-        }
+        if (issue == null) throw new RuntimeException("Jira returned null for issue: " + issueKey);
 
         JsonNode fields = issue.get("fields");
         String summary = fields.has("summary") ? fields.get("summary").asText("") : "";
@@ -47,10 +45,10 @@ public class JiraService {
         return "Summary: " + summary + "\n\nDescription:\n" + description;
     }
 
-    public void postInternalComment(String issueKey, String markdownText) {
+    public void postInternalComment(String issueKey, String text) {
         log.info("Posting comment to issue: {}", issueKey);
 
-        List<Map<String, Object>> adfContent = textToAdf(markdownText);
+        List<Map<String, Object>> adfContent = buildAdf(text);
 
         Map<String, Object> body = Map.of(
                 "body", Map.of(
@@ -70,61 +68,51 @@ public class JiraService {
         log.info("Comment posted successfully to: {}", issueKey);
     }
 
-    private List<Map<String, Object>> markdownToAdf(String markdown) {
+    /**
+     * Builds ADF from structured text.
+     * Supports:
+     * - ## Heading → heading node
+     * - **bold** text → strong marks
+     * - `code` → code marks
+     * - [text](url) → link marks
+     * - - bullet items → bulletList
+     * - 1. numbered items → orderedList
+     * - blank lines → paragraph separator
+     */
+    private List<Map<String, Object>> buildAdf(String text) {
         List<Map<String, Object>> blocks = new ArrayList<>();
-        String[] lines = markdown.split("\n");
-
+        String[] lines = text.split("\n");
         int i = 0;
+
         while (i < lines.length) {
             String line = lines[i];
 
             if (line.isBlank()) { i++; continue; }
 
-            // Code block
-            if (line.startsWith("```")) {
-                String language = line.substring(3).trim();
-                StringBuilder code = new StringBuilder();
-                i++;
-                while (i < lines.length && !lines[i].startsWith("```")) {
-                    code.append(lines[i]).append("\n");
-                    i++;
-                }
-                i++;
-                Map<String, Object> codeBlock = new LinkedHashMap<>();
-                codeBlock.put("type", "codeBlock");
-                if (!language.isEmpty()) codeBlock.put("attrs", Map.of("language", language));
-                codeBlock.put("content", List.of(Map.of("type", "text", "text", code.toString())));
-                blocks.add(codeBlock);
-                continue;
-            }
-
-            // Horizontal rule
-            if (line.matches("^[-*_]{3,}\\s*$")) {
-                blocks.add(Map.of("type", "rule"));
-                i++; continue;
-            }
-
-            // Headings
-            if (line.startsWith("#")) {
-                int level = 0;
-                while (level < line.length() && line.charAt(level) == '#') level++;
-                level = Math.min(level, 6);
-                String text = line.substring(level).trim();
+            // Heading ## or bold heading *text*
+            if (line.startsWith("## ") || line.startsWith("# ")) {
+                int level = line.startsWith("## ") ? 2 : 1;
+                String headingText = line.replaceFirst("^#+\\s+", "");
                 blocks.add(Map.of(
-                        "type", "heading",
-                        "attrs", Map.of("level", level),
-                        "content", parseInline(text)
+                    "type", "heading",
+                    "attrs", Map.of("level", level),
+                    "content", parseInline(headingText)
                 ));
                 i++; continue;
             }
 
             // Bullet list
-            if (line.matches("^[\\-*+] .+")) {
+            if (line.matches("^[-*] .+")) {
                 List<Map<String, Object>> items = new ArrayList<>();
-                while (i < lines.length && lines[i].matches("^[\\-*+] .+")) {
-                    String itemText = lines[i].replaceFirst("^[\\-*+] ", "");
-                    items.add(Map.of("type", "listItem",
-                            "content", List.of(Map.of("type", "paragraph", "content", parseInline(itemText)))));
+                while (i < lines.length && lines[i].matches("^[-*] .+")) {
+                    String itemText = lines[i].replaceFirst("^[-*] ", "");
+                    items.add(Map.of(
+                        "type", "listItem",
+                        "content", List.of(Map.of(
+                            "type", "paragraph",
+                            "content", parseInline(itemText)
+                        ))
+                    ));
                     i++;
                 }
                 blocks.add(Map.of("type", "bulletList", "content", items));
@@ -135,91 +123,95 @@ public class JiraService {
             if (line.matches("^\\d+\\. .+")) {
                 List<Map<String, Object>> items = new ArrayList<>();
                 while (i < lines.length && lines[i].matches("^\\d+\\. .+")) {
-                    String itemText = lines[i].replaceFirst("^\\d+\\. ", "");
-                    items.add(Map.of("type", "listItem",
-                            "content", List.of(Map.of("type", "paragraph", "content", parseInline(itemText)))));
+                    String itemText = lines[i].replaceFirst("^\\d+\\.\\s+", "");
+                    items.add(Map.of(
+                        "type", "listItem",
+                        "content", List.of(Map.of(
+                            "type", "paragraph",
+                            "content", parseInline(itemText)
+                        ))
+                    ));
                     i++;
                 }
                 blocks.add(Map.of("type", "orderedList", "content", items));
                 continue;
             }
 
-            // Paragraph
-            StringBuilder paraText = new StringBuilder(line);
+            // Horizontal rule
+            if (line.matches("^---+\\s*$")) {
+                blocks.add(Map.of("type", "rule"));
+                i++; continue;
+            }
+
+            // Regular paragraph — collect consecutive non-special lines
+            StringBuilder para = new StringBuilder(line);
             i++;
             while (i < lines.length
                     && !lines[i].isBlank()
                     && !lines[i].startsWith("#")
-                    && !lines[i].startsWith("```")
-                    && !lines[i].matches("^[\\-*+] .+")
+                    && !lines[i].matches("^[-*] .+")
                     && !lines[i].matches("^\\d+\\. .+")
-                    && !lines[i].matches("^[-*_]{3,}\\s*$")) {
-                paraText.append(" ").append(lines[i]);
+                    && !lines[i].matches("^---+\\s*$")) {
+                para.append(" ").append(lines[i].trim());
                 i++;
             }
-            blocks.add(Map.of("type", "paragraph", "content", parseInline(paraText.toString())));
+
+            blocks.add(Map.of(
+                "type", "paragraph",
+                "content", parseInline(para.toString())
+            ));
         }
 
         return blocks;
     }
 
+    /**
+     * Parses inline markdown: **bold**, `code`, [text](url), plain text
+     */
     private List<Map<String, Object>> parseInline(String text) {
         List<Map<String, Object>> nodes = new ArrayList<>();
-        Pattern pattern = Pattern.compile("`([^`]+)`|\\*\\*(.+?)\\*\\*|\\*(.+?)\\*|([^`*]+)");
-        Matcher matcher = pattern.matcher(text);
+        // Order matters: links first, then bold, then code, then plain
+        Pattern pattern = Pattern.compile(
+            "\\[([^\\]]+)\\]\\(([^)]+)\\)" +  // [text](url)
+            "|\\*\\*([^*]+)\\*\\*" +            // **bold**
+            "|`([^`]+)`" +                       // `code`
+            "|([^\\[`*]+)"                       // plain text
+        );
+        Matcher m = pattern.matcher(text);
 
-        while (matcher.find()) {
-            if (matcher.group(1) != null) {
+        while (m.find()) {
+            if (m.group(1) != null) {
+                // Link: [text](url)
                 Map<String, Object> node = new LinkedHashMap<>();
                 node.put("type", "text");
-                node.put("text", matcher.group(1));
-                node.put("marks", List.of(Map.of("type", "code")));
+                node.put("text", m.group(1));
+                node.put("marks", List.of(Map.of(
+                    "type", "link",
+                    "attrs", Map.of("href", m.group(2))
+                )));
                 nodes.add(node);
-            } else if (matcher.group(2) != null) {
+            } else if (m.group(3) != null) {
+                // Bold
                 Map<String, Object> node = new LinkedHashMap<>();
                 node.put("type", "text");
-                node.put("text", matcher.group(2));
+                node.put("text", m.group(3));
                 node.put("marks", List.of(Map.of("type", "strong")));
                 nodes.add(node);
-            } else if (matcher.group(3) != null) {
+            } else if (m.group(4) != null) {
+                // Code
                 Map<String, Object> node = new LinkedHashMap<>();
                 node.put("type", "text");
-                node.put("text", matcher.group(3));
-                node.put("marks", List.of(Map.of("type", "em")));
+                node.put("text", m.group(4));
+                node.put("marks", List.of(Map.of("type", "code")));
                 nodes.add(node);
-            } else if (matcher.group(4) != null) {
-                nodes.add(Map.of("type", "text", "text", matcher.group(4)));
+            } else if (m.group(5) != null && !m.group(5).isEmpty()) {
+                // Plain text
+                nodes.add(Map.of("type", "text", "text", m.group(5)));
             }
         }
 
         if (nodes.isEmpty()) nodes.add(Map.of("type", "text", "text", text));
         return nodes;
-    }
-
-    /**
-     * Converts plain text to ADF paragraphs.
-     * Splits on double newlines for paragraph breaks, single newlines within paragraphs.
-     */
-    private List<Map<String, Object>> textToAdf(String text) {
-        List<Map<String, Object>> blocks = new ArrayList<>();
-        String[] paragraphs = text.split("\n\n+");
-
-        for (String para : paragraphs) {
-            if (para.isBlank()) continue;
-            blocks.add(Map.of(
-                "type", "paragraph",
-                "content", List.of(Map.of("type", "text", "text", para.trim()))
-            ));
-        }
-
-        if (blocks.isEmpty()) {
-            blocks.add(Map.of(
-                "type", "paragraph",
-                "content", List.of(Map.of("type", "text", "text", text))
-            ));
-        }
-
-        return blocks;
     }
 
     private String extractTextFromAdf(JsonNode node) {
